@@ -1,0 +1,7 @@
+[package]
+name = "meet"
+version = "0.1.0"
+authors = ["Matthew Alonso <granjef3@gmail.com>"]
+edition = "2018"
+
+[dependencies]
