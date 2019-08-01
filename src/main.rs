@@ -5,11 +5,11 @@ use google_calendar3 as cal3;
 use hyper;
 use hyper_rustls;
 use oauth2::{
-    ApplicationSecret, Authenticator, DefaultAuthenticatorDelegate, FlowType, MemoryStorage, Token,
+    ApplicationSecret, Authenticator, DefaultAuthenticatorDelegate, FlowType, Token,
     TokenStorage,
 };
 use serde_json as json;
-use serde_json::value::Value;
+
 use std::error::Error as StdError;
 use std::fmt;
 use std::fs;
