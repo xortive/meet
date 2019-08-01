@@ -1,12 +1,11 @@
-use cal3::{CalendarHub, Channel, Error, Result as CalResult};
+use cal3::{CalendarHub, Error};
 use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
 use google_calendar3 as cal3;
 use hyper;
 use hyper_rustls;
 use oauth2::{
-    ApplicationSecret, Authenticator, DefaultAuthenticatorDelegate, FlowType, Token,
-    TokenStorage,
+    ApplicationSecret, Authenticator, DefaultAuthenticatorDelegate, FlowType, Token, TokenStorage,
 };
 use serde_json as json;
 
@@ -15,8 +14,8 @@ use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use structopt::StructOpt;
 use std::time::Duration;
+use structopt::StructOpt;
 use yup_oauth2 as oauth2;
 
 use humantime::format_duration;
@@ -113,13 +112,13 @@ impl StdError for TokenStorageError {
 
 fn main() -> Result<(), Box<dyn StdError>> {
     let config_dir = ProjectDirs::from("com", "xortive", "meet").unwrap();
-    
+
     fs::create_dir_all(config_dir.config_dir())?;
 
     let config_dir = config_dir.config_dir().to_str().unwrap();
     // Get an ApplicationSecret instance by some means. It contains the `client_id` and
     // `client_secret`, among other things.
-    let secret: ApplicationSecret = oauth2::parse_application_secret(&r#"{"installed":{"client_id":"98200360730-j7ejmtbuka46jlusbd1tjupod92um2lc.apps.googleusercontent.com","project_id":"xortive-meet","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token","auth_provider_x509_cert_url":"https://www.googleapis.com/oauth2/v1/certs","client_secret":"5BygkFeSMC4nyb8U_TA31QRl","redirect_uris":["urn:ietf:wg:oauth:2.0:oob","http://localhost:2383"]}}"#.to_string())?;
+    let secret: ApplicationSecret = oauth2::parse_application_secret(&r#"{"installed":{"client_id":"98200360730-j7ejmtbuka46jlusbd1tjupod92um2lc.apps.googleusercontent.com","project_id":"xortive-meet","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token","auth_provider_x509_cert_url":"https://www.googleapis.com/oauth2/v1/certs","client_secret":"5BygkFeSMC4nyb8U_TA31QRl","redirect_uris":["urn:ietf:wg:oauth:2.0:oob","http://localhost"]}}"#.to_string())?;
     // Instantiate the authenticator. It will choose a suitable authentication flow for you,
     // unless you replace  `None` with the desired Flow.
     // Provide your own `AuthenticatorDelegate` to adjust the way it operates and get feedback about
@@ -152,9 +151,10 @@ fn main() -> Result<(), Box<dyn StdError>> {
     // execute the final call using `doit()`.
     // Values shown here are possibly random and not representative !
     let now = Utc::now();
+
     let result = hub
         .events()
-        .list("malonso@cloudflare.com")
+        .list("primary")
         .time_min(now.to_rfc3339().as_ref())
         .single_events(true)
         .max_attendees(25)
@@ -175,33 +175,44 @@ fn main() -> Result<(), Box<dyn StdError>> {
             | Error::FieldClash(_)
             | Error::JsonDecodeError(_, _) => panic!("{:?}", e),
         },
-        Ok((_, events)) => {
-            println!("Success!");
-            events
-        },
+        Ok((_, data)) => data,
     };
 
-    if let Some(events) = data.items {
-        let start = events.iter().next().and_then(|event| {
-            event.clone().start.and_then(|start| {
-                Some(DateTime::parse_from_rfc3339(start.date_time.unwrap().as_ref()).unwrap())
-            })
+    let meetings = data
+        .items
+        .and_then(|events| {
+            Some(events
+                .into_iter()
+                .filter(|event| event.summary.is_some() && event.start.is_some())
+                .take(1)
+                .peekable())
         });
 
-        match start {
-            Some(start) => {
-                let time_until = start.signed_duration_since(now);
-                let already_started = time_until < chrono::Duration::zero();
-                let time_until = Duration::from_secs(time_until.num_seconds().abs() as u64);
+    let mut meetings = meetings.expect("reading meetings from API response");
 
-                if already_started {
-                    println!("Your next meeting already started {} ago", format_duration(time_until))
-                } else {
-                    println!("Your next meeting starts in {}", format_duration(time_until))
-                }
+    if meetings.peek().is_none() {
+        println!("Congrats! Keep working, you have no upcoming meetings");
+    }
 
-            },
-            None => {println!("you have no meetings!")}
+    for meeting in meetings {
+        let summary = meeting.summary.unwrap();
+        let start = meeting.start.unwrap();
+        let start =
+            DateTime::parse_from_rfc3339(start.date_time.unwrap().as_ref()).unwrap();
+
+        let now = Utc::now();
+        let time_until = start.signed_duration_since(now);
+        let already_started = time_until < chrono::Duration::zero();
+        let time_until = Duration::from_secs(time_until.num_seconds().abs() as u64);
+
+        let location = meeting.location.map_or("".to_string(), move |l| format!("in location {}", l));
+
+        println!("Next Meeting Details:");
+        println!("{}", summary);
+        if already_started {
+            println!("Already started {} ago {}", format_duration(time_until), location);
+        } else {
+            println!("Starts in {} {}", format_duration(time_until), location);
         }
     }
 
