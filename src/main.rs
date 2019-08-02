@@ -5,7 +5,7 @@ use google_calendar3 as cal3;
 use hyper;
 use hyper_rustls;
 use oauth2::{
-    ApplicationSecret, Authenticator, DefaultAuthenticatorDelegate, FlowType, Token, TokenStorage,
+    ApplicationSecret, Authenticator, AuthenticatorDelegate, FlowType, Token, TokenStorage,
 };
 use serde_json as json;
 
@@ -14,6 +14,7 @@ use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::Duration;
 use structopt::StructOpt;
 use yup_oauth2 as oauth2;
@@ -110,6 +111,46 @@ impl StdError for TokenStorageError {
     }
 }
 
+#[derive(Clone)]
+struct OpenAuthenticatorDelegate;
+impl AuthenticatorDelegate for OpenAuthenticatorDelegate {
+    /// Only method currently used by the InstalledFlow.
+    /// We need the user to navigate to a URL using their browser and potentially paste back a code
+    /// (or maybe not). Whether they have to enter a code depends on the InstalledFlowReturnMethod
+    /// used.
+    fn present_user_url(&mut self, url: &String, need_code: bool) -> Option<String> {
+        fn open_browser(url: &str) {
+            let windows_cmd = format!("start '{}'", url);
+            let mac_cmd = format!("open '{}'", url);
+            let linux_cmd = format!("xdg-open '{}'", url);
+
+            let _output = if cfg!(target_os = "windows") {
+                Command::new("cmd").args(&["/C", &windows_cmd]).output()
+            } else if cfg!(target_os = "linux") {
+                Command::new("sh").arg("-c").arg(&linux_cmd).output()
+            } else {
+                Command::new("sh").arg("-c").arg(&mac_cmd).output()
+            };
+        }
+
+        if need_code {
+            println!(
+                "Follow the instructions in your browser and enter the \
+                 code displayed here: "
+            );
+
+            std::thread::sleep_ms(200);
+            open_browser(url);
+
+            let mut code = String::new();
+            io::stdin().read_line(&mut code).ok().map(|_| code)
+        } else {
+            open_browser(url);
+            None
+        }
+    }
+}
+
 fn main() -> Result<(), Box<dyn StdError>> {
     let config_dir = ProjectDirs::from("com", "xortive", "meet").unwrap();
 
@@ -126,7 +167,7 @@ fn main() -> Result<(), Box<dyn StdError>> {
     // retrieve them from storage.
     let auth = Authenticator::new(
         &secret,
-        DefaultAuthenticatorDelegate,
+        OpenAuthenticatorDelegate,
         hyper::Client::with_connector(hyper::net::HttpsConnector::new(
             hyper_rustls::TlsClient::new(),
         )),
@@ -178,15 +219,15 @@ fn main() -> Result<(), Box<dyn StdError>> {
         Ok((_, data)) => data,
     };
 
-    let meetings = data
-        .items
-        .and_then(|events| {
-            Some(events
+    let meetings = data.items.and_then(|events| {
+        Some(
+            events
                 .into_iter()
                 .filter(|event| event.summary.is_some() && event.start.is_some())
                 .take(1)
-                .peekable())
-        });
+                .peekable(),
+        )
+    });
 
     let mut meetings = meetings.expect("reading meetings from API response");
 
@@ -197,20 +238,25 @@ fn main() -> Result<(), Box<dyn StdError>> {
     for meeting in meetings {
         let summary = meeting.summary.unwrap();
         let start = meeting.start.unwrap();
-        let start =
-            DateTime::parse_from_rfc3339(start.date_time.unwrap().as_ref()).unwrap();
+        let start = DateTime::parse_from_rfc3339(start.date_time.unwrap().as_ref()).unwrap();
 
         let now = Utc::now();
         let time_until = start.signed_duration_since(now);
         let already_started = time_until < chrono::Duration::zero();
         let time_until = Duration::from_secs(time_until.num_seconds().abs() as u64);
 
-        let location = meeting.location.map_or("".to_string(), move |l| format!("in location {}", l));
+        let location = meeting
+            .location
+            .map_or("".to_string(), move |l| format!("in location {}", l));
 
         println!("Next Meeting Details:");
         println!("{}", summary);
         if already_started {
-            println!("Already started {} ago {}", format_duration(time_until), location);
+            println!(
+                "Already started {} ago {}",
+                format_duration(time_until),
+                location
+            );
         } else {
             println!("Starts in {} {}", format_duration(time_until), location);
         }
