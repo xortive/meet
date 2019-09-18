@@ -5,7 +5,7 @@ authors = ["Matthew Alonso <granjef3@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-structopt = "0.2.18"
+structopt = "0.3.2"
 google-calendar3 = "1.0.10"
 # This project intentionally uses an old version of Hyper. See
 # https://github.com/Byron/google-apis-rs/issues/173 for more
